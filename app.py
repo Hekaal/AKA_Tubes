@@ -1,3 +1,4 @@
+# app.py
 import re
 import time
 import random
@@ -10,17 +11,17 @@ import matplotlib.pyplot as plt
 
 
 # =========================================================
-# Utils: preprocessing
+# 1) Preprocessing
 # =========================================================
 def preprocess_text(s: str) -> str:
     s = str(s).lower()
-    s = re.sub(r"[^a-z0-9\s]", " ", s)   # buang simbol, pertahankan huruf/angka/spasi
+    s = re.sub(r"[^a-z0-9\s]", " ", s)   # pertahankan huruf/angka/spasi
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
 
 # =========================================================
-# Trie
+# 2) Trie
 # =========================================================
 @dataclass
 class TrieNode:
@@ -48,7 +49,6 @@ class Trie:
             node = node.children[ch]
         return node
 
-    # =============== REKURSIF ===============
     def suggest_recursive(self, prefix: str, limit: int = 10) -> List[str]:
         node = self._find_prefix_node(prefix)
         if node is None:
@@ -71,7 +71,6 @@ class Trie:
         dfs(node, "")
         return results
 
-    # =============== ITERATIF ===============
     def suggest_iterative(self, prefix: str, limit: int = 10) -> List[str]:
         node = self._find_prefix_node(prefix)
         if node is None:
@@ -101,7 +100,7 @@ def build_trie(words: List[str]) -> Trie:
 
 
 # =========================================================
-# Benchmark helpers
+# 3) Benchmark helpers
 # =========================================================
 def generate_prefixes(words: List[str], n_prefix: int, min_len: int, max_len: int, seed: int) -> List[str]:
     rng = random.Random(seed)
@@ -146,15 +145,20 @@ def benchmark_for_sizes(
 
         words = words_all[:N]
 
-        # 1) waktu build trie
+        # Build time (rata-rata)
         t_build = time_function(lambda: build_trie(words), repeat=repeat)
-        trie = build_trie(words)  # bangun sekali untuk dipakai query
 
-        # 2) prefix uji
-        prefixes = generate_prefixes(words, n_prefix=prefix_tests,
-                                     min_len=prefix_min_len, max_len=prefix_max_len, seed=seed)
+        # Build sekali untuk query (di luar timing)
+        trie = build_trie(words)
 
-        # 3) workload: autocomplete berulang
+        prefixes = generate_prefixes(
+            words,
+            n_prefix=prefix_tests,
+            min_len=prefix_min_len,
+            max_len=prefix_max_len,
+            seed=seed
+        )
+
         def work_rec():
             for p in prefixes:
                 trie.suggest_recursive(p, limit=suggestion_limit)
@@ -179,44 +183,44 @@ def benchmark_for_sizes(
 
 
 # =========================================================
-# Streamlit UI
+# 4) Streamlit UI
 # =========================================================
 st.set_page_config(page_title="Trie Autocomplete AKA", layout="wide")
-st.title("Aplikasi Autocomplete Trie — Iteratif vs Rekursif (Tubes AKA)")
+st.title("Autocomplete Trie — Iteratif vs Rekursif (Tubes AKA)")
 
 st.markdown(
     """
 Aplikasi ini:
 - membangun **Trie** dari dataset `product_name`,
 - menampilkan **autocomplete** berdasarkan prefix,
-- dan menjalankan **benchmark** (grafik N vs waktu) untuk membandingkan traversal **rekursif** vs **iteratif**.
+- dan menjalankan **benchmark** untuk membandingkan traversal **rekursif** vs **iteratif**.
 """
 )
 
 # Sidebar controls
 st.sidebar.header("Pengaturan")
+mode = st.sidebar.radio("Mode Traversal (Autocomplete)", ["Rekursif", "Iteratif"])
 suggestion_limit = st.sidebar.slider("Top-k suggestions", 1, 50, 10)
-mode = st.sidebar.radio("Mode Autocomplete", ["Rekursif", "Iteratif"], horizontal=False)
-show_clean = st.sidebar.checkbox("Tampilkan hasil preprocessing", value=False)
 
 st.sidebar.divider()
 st.sidebar.subheader("Benchmark")
-default_sizes = "10,50,100,500,1000,5000,10000"
+default_sizes = "10,50,100,500,1000,2000,5000"
 sizes_text = st.sidebar.text_input("Ukuran N (pisahkan koma)", value=default_sizes)
 prefix_tests = st.sidebar.slider("Jumlah prefix uji per N", 10, 300, 50, step=10)
-prefix_min_len = st.sidebar.slider("Panjang prefix minimum", 1, 10, 2)
-prefix_max_len = st.sidebar.slider("Panjang prefix maksimum", 2, 20, 6)
+prefix_min_len = st.sidebar.slider("Panjang prefix min", 1, 10, 2)
+prefix_max_len = st.sidebar.slider("Panjang prefix max", 2, 20, 6)
 repeat = st.sidebar.slider("Repeat timing (stabilitas)", 1, 7, 3)
 seed = st.sidebar.number_input("Random seed", min_value=0, max_value=10_000_000, value=42)
 
-# Upload dataset
-uploaded = st.file_uploader("Upload dataset CSV (wajib ada kolom: product_name)", type=["csv"])
+st.sidebar.divider()
+st.sidebar.caption("Tips: Untuk dataset besar, jalankan benchmark bertahap (misal sampai 5000 dulu).")
 
+uploaded = st.file_uploader("Upload dataset CSV (wajib ada kolom: product_name)", type=["csv"])
 if not uploaded:
     st.info("Upload file CSV dulu untuk mulai.")
     st.stop()
 
-# Load + preprocess (cache)
+
 @st.cache_data(show_spinner=False)
 def load_and_preprocess(file) -> pd.DataFrame:
     df0 = pd.read_csv(file)
@@ -226,6 +230,7 @@ def load_and_preprocess(file) -> pd.DataFrame:
     df0 = df0[df0["clean_name"].str.len() > 0].reset_index(drop=True)
     return df0
 
+
 try:
     df = load_and_preprocess(uploaded)
 except Exception as e:
@@ -233,33 +238,34 @@ except Exception as e:
     st.stop()
 
 words_all = df["clean_name"].tolist()
+st.write(f"Total data valid: **{len(words_all)}**")
 
-colA, colB = st.columns([1.2, 1.0], gap="large")
+# Preview
+with st.expander("Preview dataset (20 baris pertama)", expanded=False):
+    st.dataframe(df[["product_name", "clean_name"]].head(20), width="stretch")
 
-with colA:
-    st.subheader("Preview Data")
-    st.write(f"Total data valid: **{len(words_all)}**")
-    st.dataframe(df[["product_name", "clean_name"]].head(20), use_container_width=True)
+# =========================================================
+# Demo Autocomplete (STABIL - session_state)
+# =========================================================
+st.subheader("Demo Autocomplete (Single Query)")
 
-    if show_clean:
-        st.caption("Contoh 30 clean_name:")
-        st.write(words_all[:30])
+max_demo = min(len(words_all), 5000)  # batasi biar aman
+demo_n = st.slider("Ukuran data untuk demo (N)", 10, max_demo, min(1000, max_demo))
 
-with colB:
-    st.subheader("Coba Autocomplete (Single Query)")
+# Build Trie hanya saat N berubah (bukan tiap re-run kecil)
+if "trie_demo" not in st.session_state or st.session_state.get("trie_demo_n") != demo_n:
+    with st.spinner(f"Membangun Trie untuk N={demo_n} ..."):
+        st.session_state.trie_demo = build_trie(words_all[:demo_n])
+        st.session_state.trie_demo_n = demo_n
 
-    # Build Trie cached per dataset size
-    @st.cache_resource(show_spinner=False)
-    def get_trie_for_n(words: Tuple[str, ...], n: int) -> Trie:
-        return build_trie(list(words[:n]))
+trie_demo: Trie = st.session_state.trie_demo
 
-    # pilih N untuk demo (biar realistis sesuai benchmark)
-    demo_n = st.slider("Ukuran data untuk demo (N)", 10, min(len(words_all), 50000), min(1000, len(words_all)))
-    trie_demo = get_trie_for_n(tuple(words_all), demo_n)
+prefix_in = st.text_input("Ketik prefix", value="win")
+prefix = preprocess_text(prefix_in)
 
-    prefix_in = st.text_input("Ketik prefix", value="win")
-    prefix = preprocess_text(prefix_in)
+col1, col2 = st.columns([1, 1], gap="large")
 
+with col1:
     if st.button("Cari Suggestions"):
         start = time.perf_counter()
         if mode == "Rekursif":
@@ -268,16 +274,31 @@ with colB:
             sug = trie_demo.suggest_iterative(prefix, limit=suggestion_limit)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        st.metric("Waktu (ms)", f"{elapsed_ms:.3f}")
+        st.metric("Waktu eksekusi (ms)", f"{elapsed_ms:.3f}")
         st.write("Suggestions:")
         if sug:
             st.write(sug)
         else:
             st.warning("Tidak ada suggestion untuk prefix tersebut.")
 
+with col2:
+    st.markdown("**Catatan proses:**")
+    st.markdown(
+        """
+- Trie dibangun dari **N** data (demo).
+- Saat user mengetik prefix:
+  1) Trie mencari node prefix (**O(P)**)
+  2) Traversal subtree untuk suggestions (**iteratif vs rekursif**)
+"""
+    )
+
 st.divider()
 
-# Parse sizes
+# =========================================================
+# Benchmark
+# =========================================================
+st.subheader("Benchmark (Grafik N vs Waktu)")
+
 def parse_sizes(s: str) -> List[int]:
     out = []
     for part in s.split(","):
@@ -286,22 +307,20 @@ def parse_sizes(s: str) -> List[int]:
             continue
         try:
             out.append(int(part))
-        except:
-            pass
+        except ValueError:
+            continue
     out = sorted(set([x for x in out if x > 0]))
     return out
 
 sizes = parse_sizes(sizes_text)
 if not sizes:
-    st.error("Ukuran N kosong / tidak valid. Contoh: 10,50,100,500,1000")
+    st.error("Ukuran N tidak valid. Contoh: 10,50,100,500,1000")
     st.stop()
-
-st.subheader("Benchmark (N vs Waktu)")
 
 benchmark_clicked = st.button("Jalankan Benchmark")
 
 if benchmark_clicked:
-    with st.spinner("Benchmark berjalan..."):
+    with st.spinner("Menjalankan benchmark..."):
         res = benchmark_for_sizes(
             words_all=words_all,
             sizes=sizes,
@@ -314,14 +333,13 @@ if benchmark_clicked:
         )
 
     if res.empty:
-        st.warning("Hasil benchmark kosong (mungkin N terlalu besar atau data terlalu sedikit).")
+        st.warning("Hasil benchmark kosong. Coba perkecil ukuran N atau cek dataset.")
         st.stop()
 
-    st.write("Tabel hasil:")
-    st.dataframe(res, use_container_width=True)
+    st.write("Tabel hasil benchmark:")
+    st.dataframe(res, width="stretch")
 
-    # Plot
-    st.write("Grafik:")
+    st.write("Grafik perbandingan:")
     fig = plt.figure()
     plt.plot(res["N"], res["build_ms"], marker="o", label="Build Trie (ms)")
     plt.plot(res["N"], res["autocomplete_recursive_ms"], marker="o", label="Autocomplete Rekursif (ms)")
@@ -332,8 +350,8 @@ if benchmark_clicked:
     plt.grid(True)
     plt.legend()
     st.pyplot(fig, clear_figure=True)
+    plt.close(fig)
 
-    # Download
     csv_bytes = res.to_csv(index=False).encode("utf-8")
     st.download_button(
         "Download hasil benchmark (CSV)",
@@ -341,7 +359,5 @@ if benchmark_clicked:
         file_name="hasil_benchmark_trie.csv",
         mime="text/csv"
     )
-
 else:
     st.info("Klik **Jalankan Benchmark** untuk menghasilkan tabel + grafik.")
-
