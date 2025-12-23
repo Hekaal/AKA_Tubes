@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 
 # =========================================================
-# 1) Preprocessing
+# Preprocessing
 # =========================================================
 def preprocess_text(s: str) -> str:
     s = str(s).lower()
@@ -20,7 +20,7 @@ def preprocess_text(s: str) -> str:
 
 
 # =========================================================
-# 2) Trie
+# Trie
 # =========================================================
 @dataclass
 class TrieNode:
@@ -32,7 +32,7 @@ class Trie:
     def __init__(self):
         self.root = TrieNode()
 
-    def insert(self, word: str) -> None:
+    def insert(self, word: str):
         node = self.root
         for ch in word:
             if ch not in node.children:
@@ -48,52 +48,47 @@ class Trie:
             node = node.children[ch]
         return node
 
-    # ---------- REKURSIF (AMAN) ----------
-    def suggest_recursive(self, prefix: str, limit: int = 10, max_depth: int = 200) -> List[str]:
-        """
-        DFS rekursif dengan pembatasan kedalaman (anti RecursionError).
-        Secara konsep tetap rekursif (DFS).
-        """
-        node = self._find_prefix_node(prefix)
-        if node is None:
-            return []
-
-        results: List[str] = []
-
-        def dfs(curr: TrieNode, path: str, depth: int):
-            if depth > max_depth or len(results) >= limit:
-                return
-            if curr.is_end:
-                results.append(prefix + path)
-                if len(results) >= limit:
-                    return
-            for ch, nxt in curr.children.items():
-                dfs(nxt, path + ch, depth + 1)
-                if len(results) >= limit:
-                    return
-
-        dfs(node, "", 0)
-        return results
-
-    # ---------- ITERATIF ----------
+    # ----- ITERATIF -----
     def suggest_iterative(self, prefix: str, limit: int = 10) -> List[str]:
         node = self._find_prefix_node(prefix)
-        if node is None:
+        if not node:
             return []
 
-        results: List[str] = []
+        res = []
         stack: List[Tuple[TrieNode, str]] = [(node, "")]
 
-        while stack and len(results) < limit:
+        while stack and len(res) < limit:
             curr, path = stack.pop()
             if curr.is_end:
-                results.append(prefix + path)
-                if len(results) >= limit:
+                res.append(prefix + path)
+                if len(res) >= limit:
                     break
             for ch, nxt in curr.children.items():
                 stack.append((nxt, path + ch))
+        return res
 
-        return results
+    # ----- REKURSIF (DIBATASI) -----
+    def suggest_recursive(self, prefix: str, limit: int = 10, max_depth: int = 200) -> List[str]:
+        node = self._find_prefix_node(prefix)
+        if not node:
+            return []
+
+        res = []
+
+        def dfs(curr: TrieNode, path: str, depth: int):
+            if depth > max_depth or len(res) >= limit:
+                return
+            if curr.is_end:
+                res.append(prefix + path)
+                if len(res) >= limit:
+                    return
+            for ch, nxt in curr.children.items():
+                dfs(nxt, path + ch, depth + 1)
+                if len(res) >= limit:
+                    return
+
+        dfs(node, "", 0)
+        return res
 
 
 def build_trie(words: List[str]) -> Trie:
@@ -105,209 +100,175 @@ def build_trie(words: List[str]) -> Trie:
 
 
 # =========================================================
-# 3) Benchmark helpers
-# =========================================================
-def generate_prefixes(words: List[str], n_prefix: int, min_len: int, max_len: int, seed: int) -> List[str]:
-    rng = random.Random(seed)
-    candidates = [w for w in words if len(w) >= min_len]
-    if not candidates:
-        return []
-    out = []
-    for _ in range(n_prefix):
-        w = rng.choice(candidates)
-        L = rng.randint(min_len, min(max_len, len(w)))
-        out.append(w[:L])
-    return out
-
-
-def time_function(fn: Callable[[], None], repeat: int) -> float:
-    times = []
-    for _ in range(repeat):
-        start = time.perf_counter()
-        fn()
-        times.append(time.perf_counter() - start)
-    return sum(times) / len(times)
-
-
-def benchmark_for_sizes(
-    words_all: List[str],
-    sizes: List[int],
-    prefix_tests: int,
-    suggestion_limit: int,
-    prefix_min_len: int,
-    prefix_max_len: int,
-    repeat: int,
-    seed: int
-) -> pd.DataFrame:
-    rows = []
-    for N in sizes:
-        if N <= 0 or N > len(words_all):
-            break
-
-        words = words_all[:N]
-
-        t_build = time_function(lambda: build_trie(words), repeat=repeat)
-        trie = build_trie(words)
-
-        prefixes = generate_prefixes(words, prefix_tests, prefix_min_len, prefix_max_len, seed)
-
-        def work_rec():
-            for p in prefixes:
-                trie.suggest_recursive(p, limit=suggestion_limit)
-
-        def work_it():
-            for p in prefixes:
-                trie.suggest_iterative(p, limit=suggestion_limit)
-
-        t_rec = time_function(work_rec, repeat=repeat)
-        t_it = time_function(work_it, repeat=repeat)
-
-        rows.append({
-            "N": N,
-            "build_ms": t_build * 1000,
-            "autocomplete_recursive_ms": t_rec * 1000,
-            "autocomplete_iterative_ms": t_it * 1000,
-            "prefix_tests": len(prefixes),
-            "suggestion_limit": suggestion_limit
-        })
-    return pd.DataFrame(rows)
-
-
-# =========================================================
-# 4) Streamlit UI
+# Streamlit UI
 # =========================================================
 st.set_page_config(page_title="Trie Autocomplete AKA", layout="wide")
 st.title("Autocomplete Trie — Iteratif vs Rekursif (Tubes AKA)")
-st.markdown(
-    "Aplikasi ini membangun **Trie** dari `product_name`, menampilkan **autocomplete**, "
-    "dan membandingkan efisiensi traversal **rekursif vs iteratif**."
-)
 
-# Sidebar
-st.sidebar.header("Pengaturan")
-mode = st.sidebar.radio("Mode Traversal", ["Rekursif", "Iteratif"])
-suggestion_limit = st.sidebar.slider("Top-k suggestions", 1, 50, 10)
+st.markdown("""
+Aplikasi ini **membandingkan algoritma Trie autocomplete** menggunakan:
+- Traversal **Iteratif**
+- Traversal **Rekursif**
 
-st.sidebar.divider()
-st.sidebar.subheader("Benchmark")
-sizes_text = st.sidebar.text_input("Ukuran N (pisahkan koma)", value="10,50,100,500,1000,2000,5000")
-prefix_tests = st.sidebar.slider("Jumlah prefix uji per N", 10, 300, 50, step=10)
-prefix_min_len = st.sidebar.slider("Panjang prefix min", 1, 10, 2)
-prefix_max_len = st.sidebar.slider("Panjang prefix max", 2, 20, 6)
-repeat = st.sidebar.slider("Repeat timing", 1, 7, 3)
-seed = st.sidebar.number_input("Random seed", 0, 10_000_000, 42)
+Perbandingan dilakukan **dalam satu eksekusi terkontrol** untuk menjaga stabilitas
+dan keadilan pengukuran waktu.
+""")
 
+# Upload dataset
 uploaded = st.file_uploader("Upload CSV (kolom wajib: product_name)", type=["csv"])
 if not uploaded:
-    st.info("Upload file CSV untuk mulai.")
+    st.info("Upload dataset untuk mulai.")
     st.stop()
 
 @st.cache_data(show_spinner=False)
-def load_and_preprocess(file) -> pd.DataFrame:
-    df0 = pd.read_csv(file)
-    if "product_name" not in df0.columns:
+def load_data(file):
+    df = pd.read_csv(file)
+    if "product_name" not in df.columns:
         raise ValueError("Kolom 'product_name' tidak ditemukan.")
-    df0["clean_name"] = df0["product_name"].astype(str).apply(preprocess_text)
-    df0 = df0[df0["clean_name"].str.len() > 0].reset_index(drop=True)
-    return df0
+    df["clean_name"] = df["product_name"].astype(str).apply(preprocess_text)
+    df = df[df["clean_name"].str.len() > 0].reset_index(drop=True)
+    return df
 
-try:
-    df = load_and_preprocess(uploaded)
-except Exception as e:
-    st.error(str(e))
-    st.stop()
-
+df = load_data(uploaded)
 words_all = df["clean_name"].tolist()
+
 st.write(f"Total data valid: **{len(words_all)}**")
 
-with st.expander("Preview data (20 baris)", expanded=False):
+with st.expander("Preview data"):
     st.dataframe(df[["product_name", "clean_name"]].head(20), width="stretch")
 
-# ---------------- Demo Autocomplete (STABIL) ----------------
-st.subheader("Demo Autocomplete (Single Query)")
-max_demo = min(len(words_all), 1500)   # BATASI DEMO (AMAN UNTUK REKURSIF)
-demo_n = st.slider("Ukuran data demo (N)", 10, max_demo, min(500, max_demo))
+# =========================================================
+# Demo Autocomplete (AMAN)
+# =========================================================
+st.subheader("Perbandingan Autocomplete (Satu Prefix)")
 
-# Bangun Trie hanya saat N berubah
-if "trie_demo" not in st.session_state or st.session_state.get("trie_demo_n") != demo_n:
-    with st.spinner(f"Membangun Trie untuk N={demo_n} ..."):
+MAX_DEMO = min(len(words_all), 1000)
+demo_n = st.slider("Ukuran data (N)", 10, MAX_DEMO, min(500, MAX_DEMO))
+
+if "trie_demo" not in st.session_state or st.session_state.get("trie_n") != demo_n:
+    with st.spinner("Membangun Trie..."):
         st.session_state.trie_demo = build_trie(words_all[:demo_n])
-        st.session_state.trie_demo_n = demo_n
+        st.session_state.trie_n = demo_n
 
-trie_demo: Trie = st.session_state.trie_demo
+trie = st.session_state.trie_demo
 
-prefix_in = st.text_input("Ketik prefix", value="win")
-prefix = preprocess_text(prefix_in)
+prefix_input = st.text_input("Masukkan prefix", value="win")
+prefix = preprocess_text(prefix_input)
 
-if st.button("Cari Suggestions"):
+k = st.slider("Jumlah suggestion (top-k)", 1, 20, 10)
+
+# ==========================
+# SATU TOMBOL PERBANDINGAN
+# ==========================
+if st.button("Bandingkan Iteratif vs Rekursif"):
+    # Iteratif
+    t0 = time.perf_counter()
+    sug_it = trie.suggest_iterative(prefix, limit=k)
+    t_it = (time.perf_counter() - t0) * 1000
+
+    # Rekursif (sekali, aman)
     try:
-        start = time.perf_counter()
-        if mode == "Rekursif":
-            sug = trie_demo.suggest_recursive(prefix, limit=suggestion_limit, max_depth=200)
-        else:
-            sug = trie_demo.suggest_iterative(prefix, limit=suggestion_limit)
-        elapsed_ms = (time.perf_counter() - start) * 1000
-
-        st.metric("Waktu eksekusi (ms)", f"{elapsed_ms:.3f}")
-        st.write("Suggestions:")
-        st.write(sug if sug else "Tidak ada suggestion.")
+        t1 = time.perf_counter()
+        sug_rec = trie.suggest_recursive(prefix, limit=k, max_depth=200)
+        t_rec = (time.perf_counter() - t1) * 1000
+        rec_ok = True
     except RecursionError:
-        st.error("Traversal rekursif melebihi batas. Kurangi N atau prefix.")
+        sug_rec = []
+        t_rec = None
+        rec_ok = False
+
+    st.subheader("Hasil Perbandingan")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Iteratif (ms)", f"{t_it:.3f}")
+        st.write("Suggestions:")
+        st.write(sug_it if sug_it else "-")
+
+    with col2:
+        if rec_ok:
+            st.metric("Rekursif (ms)", f"{t_rec:.3f}")
+            st.write("Suggestions:")
+            st.write(sug_rec if sug_rec else "-")
+        else:
+            st.error("Traversal rekursif melebihi batas kedalaman.")
+
+    st.markdown("""
+**Catatan Akademik:**
+- Kedua algoritma memiliki kelas kompleksitas yang sama secara asimtotik.
+- Perbedaan waktu disebabkan oleh overhead stack rekursif vs stack manual.
+""")
+
 
 st.divider()
 
-# ---------------- Benchmark ----------------
-st.subheader("Benchmark (N vs Waktu)")
+# =========================================================
+# Benchmark (Batch, Aman)
+# =========================================================
+st.subheader("Benchmark Runtime (Batch)")
+
+sizes_text = st.text_input("Ukuran N (pisahkan koma)", value="10,50,100,500,1000")
+prefix_tests = st.slider("Jumlah prefix uji per N", 10, 200, 50)
 
 def parse_sizes(s: str) -> List[int]:
     out = []
-    for part in s.split(","):
-        part = part.strip()
-        if part.isdigit():
-            out.append(int(part))
-    return sorted(set([x for x in out if x > 0]))
+    for p in s.split(","):
+        if p.strip().isdigit():
+            out.append(int(p.strip()))
+    return sorted(set(out))
 
 sizes = parse_sizes(sizes_text)
-if not sizes:
-    st.error("Ukuran N tidak valid.")
-    st.stop()
 
 if st.button("Jalankan Benchmark"):
-    with st.spinner("Menjalankan benchmark..."):
-        res = benchmark_for_sizes(
-            words_all=words_all,
-            sizes=sizes,
-            prefix_tests=prefix_tests,
-            suggestion_limit=suggestion_limit,
-            prefix_min_len=prefix_min_len,
-            prefix_max_len=prefix_max_len,
-            repeat=repeat,
-            seed=seed,
+    rows = []
+
+    for N in sizes:
+        if N > len(words_all):
+            continue
+
+        trie_bm = build_trie(words_all[:N])
+
+        prefixes = random.sample(
+            [w[:3] for w in words_all[:N] if len(w) >= 3],
+            min(prefix_tests, N)
         )
 
-    if res.empty:
-        st.warning("Hasil kosong. Coba perkecil N.")
-        st.stop()
+        # Iteratif
+        t0 = time.perf_counter()
+        for p in prefixes:
+            trie_bm.suggest_iterative(p)
+        t_it = (time.perf_counter() - t0) * 1000
 
+        # Rekursif
+        t1 = time.perf_counter()
+        for p in prefixes:
+            trie_bm.suggest_recursive(p, max_depth=200)
+        t_rec = (time.perf_counter() - t1) * 1000
+
+        rows.append({
+            "N": N,
+            "Iteratif_ms": t_it,
+            "Rekursif_ms": t_rec
+        })
+
+    res = pd.DataFrame(rows)
     st.dataframe(res, width="stretch")
 
     fig = plt.figure()
-    plt.plot(res["N"], res["build_ms"], marker="o", label="Build Trie (ms)")
-    plt.plot(res["N"], res["autocomplete_recursive_ms"], marker="o", label="Autocomplete Rekursif (ms)")
-    plt.plot(res["N"], res["autocomplete_iterative_ms"], marker="o", label="Autocomplete Iteratif (ms)")
-    plt.xlabel("Ukuran input (N)")
+    plt.plot(res["N"], res["Iteratif_ms"], marker="o", label="Iteratif")
+    plt.plot(res["N"], res["Rekursif_ms"], marker="o", label="Rekursif")
+    plt.xlabel("Ukuran Input (N)")
     plt.ylabel("Waktu (ms)")
-    plt.title("Benchmark Trie: Build + Autocomplete")
+    plt.title("Perbandingan Runtime Autocomplete Trie")
     plt.grid(True)
     plt.legend()
-    st.pyplot(fig, clear_figure=True)
+    st.pyplot(fig)
     plt.close(fig)
 
     st.download_button(
-        "Download hasil benchmark (CSV)",
-        data=res.to_csv(index=False).encode("utf-8"),
+        "Download hasil benchmark",
+        data=res.to_csv(index=False).encode(),
         file_name="hasil_benchmark_trie.csv",
         mime="text/csv"
     )
-else:
-    st.info("Klik **Jalankan Benchmark** untuk melihat tabel & grafik.")
