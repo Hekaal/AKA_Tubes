@@ -1,7 +1,8 @@
 # =========================================================
-# app.py — Trie Autocomplete AKA
-# Input manual: N iterasi + prefix uji
+# app.py — Trie Autocomplete AKA (FULL VERSION)
+# Manual input: N iterasi + prefix uji (tanpa default)
 # Output: tabel nilai + 3 grafik (iteratif, rekursif, gabungan)
+# Dataset besar: MAX_ROWS slider otomatis sampai total baris
 # =========================================================
 
 import re
@@ -76,6 +77,7 @@ class Trie:
         node = self._find_prefix_node(prefix)
         if node is None:
             return []
+
         res: List[str] = []
 
         def dfs(curr: TrieNode, path: str, depth: int):
@@ -103,7 +105,7 @@ def build_trie(words: List[str]) -> Trie:
 
 
 # =========================
-# HELPERS: parsing manual input
+# HELPERS
 # =========================
 def parse_int_list(s: str) -> List[int]:
     out = []
@@ -115,35 +117,23 @@ def parse_int_list(s: str) -> List[int]:
             out.append(int(part))
         except ValueError:
             pass
-    out = sorted(set([x for x in out if x > 0]))
-    return out
+    return sorted(set([x for x in out if x > 0]))
 
 
 # =========================
 # STREAMLIT UI
 # =========================
 st.set_page_config(page_title="Trie Autocomplete AKA", layout="wide")
-st.title("Trie Autocomplete — Iteratif vs Rekursif (Input Manual)")
+st.title("Trie Autocomplete — Iteratif vs Rekursif (Input Manual, Dataset Besar)")
 
 st.markdown("""
 Aplikasi ini:
-1) membaca dataset `amazon_products.csv` (kolom wajib: `product_name`),  
-2) membangun Trie,  
-3) menjalankan eksperimen untuk **beberapa ukuran input N** (manual) dan **beberapa prefix uji** (manual),  
+1) membaca dataset CSV (kolom wajib: **product_name**),  
+2) membangun Trie dari subset data,  
+3) menjalankan eksperimen untuk **beberapa ukuran input N** (manual) dan **prefix uji** (manual),  
 4) menampilkan **tabel nilai** + **3 grafik**: Iteratif, Rekursif, Gabungan.
 """)
 
-# ----- Sidebar: stabilitas -----
-st.sidebar.header("Stabilitas")
-MAX_ROWS = st.sidebar.slider("Batasi jumlah baris dataset (MAX_ROWS)", 200, 20000, 5000, step=200)
-MAX_LEN = st.sidebar.slider("Batasi panjang string (MAX_LEN)", 30, 200, 90, step=10)
-
-st.sidebar.divider()
-st.sidebar.header("Pengaturan Algoritma")
-TOP_K = st.sidebar.slider("Top-k suggestions", 1, 50, 10)
-MAX_DEPTH = st.sidebar.slider("Batas kedalaman rekursif (max_depth)", 50, 500, 200, step=10)
-
-# ----- Upload dataset -----
 uploaded = st.file_uploader("Upload CSV (kolom wajib: product_name)", type=["csv"])
 if not uploaded:
     st.info("Upload file CSV dulu untuk mulai.")
@@ -159,21 +149,50 @@ def load_and_preprocess(file) -> pd.DataFrame:
     return df
 
 try:
-    df = load_and_preprocess(uploaded)
+    df_full = load_and_preprocess(uploaded)
 except Exception as e:
     st.error(str(e))
     st.stop()
 
-df = df.head(MAX_ROWS).copy()
+TOTAL_ROWS = len(df_full)
+
+# ===== Sidebar stabilitas (max = total baris dataset) =====
+st.sidebar.header("Stabilitas (Dataset Besar)")
+MAX_ROWS = st.sidebar.slider(
+    f"Batasi jumlah baris dataset (MAX_ROWS) | total={TOTAL_ROWS}",
+    min_value=1000,
+    max_value=TOTAL_ROWS,
+    value=min(50000, TOTAL_ROWS),   # default aman
+    step=5000
+)
+
+MAX_LEN = st.sidebar.slider(
+    "Batasi panjang string (MAX_LEN)",
+    min_value=30,
+    max_value=200,
+    value=80,
+    step=10
+)
+
+st.sidebar.divider()
+st.sidebar.header("Pengaturan Algoritma")
+TOP_K = st.sidebar.slider("Top-k suggestions", 1, 50, 10)
+MAX_DEPTH = st.sidebar.slider("Batas kedalaman rekursif (max_depth)", 50, 500, 200, step=10)
+
+# Terapkan batasan
+df = df_full.head(MAX_ROWS).copy()
 words_all = [w[:MAX_LEN] for w in df["clean_name"].tolist()]
+
+st.write(f"Total data di file: **{TOTAL_ROWS}** baris")
+st.write(f"Data yang dipakai: **{len(words_all)}** baris (MAX_ROWS={MAX_ROWS}), panjang string dipotong **{MAX_LEN}** karakter")
 
 with st.expander("Preview data (20 baris)", expanded=False):
     st.dataframe(df[["product_name", "clean_name"]].head(20), width="stretch")
 
-st.write(f"Data dipakai: **{len(words_all)}** baris (MAX_ROWS={MAX_ROWS}), panjang string dipotong **{MAX_LEN}** karakter.")
+st.divider()
 
 # =========================
-# INPUT MANUAL: N ITERASI + PREFIX UJI
+# INPUT MANUAL: N + PREFIX (tanpa default)
 # =========================
 st.subheader("Input Manual Eksperimen")
 
@@ -182,24 +201,25 @@ n_text = st.text_input("Contoh: 10,50,100,500,1000", value="")
 
 N_list = parse_int_list(n_text)
 if not N_list:
-    st.warning("Masukkan minimal 1 nilai N. Contoh: 10,50,100")
+    st.warning("Masukkan minimal 1 nilai N.")
     st.stop()
 
-# Filter supaya tidak melebihi jumlah data
+# filter N agar <= jumlah data yang dipakai
 N_list = [N for N in N_list if N <= len(words_all)]
 if not N_list:
-    st.warning("Semua N lebih besar dari jumlah data. Kecilkan N atau naikkan MAX_ROWS.")
+    st.warning("Semua N lebih besar dari data yang dipakai (MAX_ROWS). Naikkan MAX_ROWS atau kecilkan N.")
     st.stop()
 
 st.markdown("**2) Daftar prefix/kata uji (1 baris = 1 prefix)**")
-prefix_text = st.text_area("Isi prefix (tanpa default). Contoh:\nwin\nlug\ntsa", value="", height=140)
+prefix_text = st.text_area("Masukkan prefix tanpa default (contoh: win\\nlug\\ntsa)", value="", height=140)
 
 prefixes_raw = [line.strip() for line in prefix_text.splitlines() if line.strip()]
 prefixes = [preprocess_text(p) for p in prefixes_raw if preprocess_text(p)]
-
 if not prefixes:
     st.warning("Masukkan minimal 1 prefix/kata uji.")
     st.stop()
+
+st.info(f"Eksperimen akan menguji **{len(N_list)} nilai N** × **{len(prefixes)} prefix** = **{len(N_list) * len(prefixes)}** percobaan.")
 
 # =========================
 # RUN EXPERIMENT
@@ -208,21 +228,22 @@ st.subheader("Jalankan Eksperimen")
 
 if st.button("RUN: Bandingkan Iteratif vs Rekursif"):
     rows = []
-
-    progress = st.progress(0)
     total_steps = len(N_list) * len(prefixes)
     step = 0
+    prog = st.progress(0)
 
+    # jalankan per N
     for N in N_list:
-        trie = build_trie(words_all[:N])
+        with st.spinner(f"Membangun Trie untuk N={N} ..."):
+            trie = build_trie(words_all[:N])
 
         for p in prefixes:
-            # Iteratif runtime
+            # Iteratif
             t0 = time.perf_counter()
             _ = trie.suggest_iterative(p, limit=TOP_K)
             t_it = (time.perf_counter() - t0) * 1000
 
-            # Rekursif runtime
+            # Rekursif
             try:
                 t1 = time.perf_counter()
                 _ = trie.suggest_recursive(p, limit=TOP_K, max_depth=MAX_DEPTH)
@@ -238,9 +259,9 @@ if st.button("RUN: Bandingkan Iteratif vs Rekursif"):
             })
 
             step += 1
-            progress.progress(min(step / total_steps, 1.0))
+            prog.progress(min(step / total_steps, 1.0))
 
-        # release memory per N
+        # release memory
         del trie
         gc.collect()
 
@@ -249,9 +270,7 @@ if st.button("RUN: Bandingkan Iteratif vs Rekursif"):
     st.subheader("Tabel Nilai (per N dan prefix)")
     st.dataframe(res, width="stretch")
 
-    # =========================
-    # AGGREGATE for plots: mean per N
-    # =========================
+    # ===== agregasi mean per N untuk grafik =====
     agg = res.groupby("N", as_index=False).agg(
         iterative_ms=("iterative_ms", "mean"),
         recursive_ms=("recursive_ms", "mean")
@@ -297,7 +316,7 @@ if st.button("RUN: Bandingkan Iteratif vs Rekursif"):
     )
 
     st.download_button(
-        "Download agregasi untuk grafik (CSV)",
+        "Download agregasi grafik (CSV)",
         data=agg.to_csv(index=False).encode("utf-8"),
         file_name="hasil_agregasi_mean_per_N.csv",
         mime="text/csv"
@@ -305,7 +324,7 @@ if st.button("RUN: Bandingkan Iteratif vs Rekursif"):
 
     st.markdown("""
 **Catatan untuk laporan:**
-- Tabel berisi runtime per pasangan (N, prefix).
-- Grafik menggunakan **rata-rata runtime per N** dari semua prefix manual.
+- Tabel berisi runtime untuk setiap pasangan (N, prefix).
+- Grafik memakai **rata-rata runtime per N** dari semua prefix manual.
 - Jika `recursive_ms` menjadi NaN, berarti traversal rekursif melewati batas `max_depth` pada sebagian kasus.
 """)
